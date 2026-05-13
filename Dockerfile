@@ -12,8 +12,14 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     openssl \
     && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+# Copy the binary
 COPY --from=builder /app/target/release/github-cli /usr/local/bin/github-cli
+# Copy the source files (so /stats and /ls work)
+COPY . .
+
 ENV PORT=3001
-ENV PROJECT_PATH=.
+ENV PROJECT_PATH=/app
 ENV SERVER_ONLY=true
 CMD ["github-cli"]

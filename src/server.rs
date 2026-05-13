@@ -41,6 +41,7 @@ pub struct LogQuery {
 
 pub async fn start_server() {
     let app = Router::new()
+        .route("/", get(|| async { "GitHub CLI Backend is running!" }))
         .route("/stats", get(handle_stats))
         .route("/deps", get(handle_deps))
         .route("/ls", get(handle_ls))
