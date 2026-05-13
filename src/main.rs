@@ -6,7 +6,14 @@ mod server;
 
 #[tokio::main]
 async fn main() {
-    // Start HTTP server in background
+    // If SERVER_ONLY env var is set, just run the server (for Railway/cloud)
+    if std::env::var("SERVER_ONLY").is_ok() {
+        println!("Starting github-cli server in server-only mode...");
+        server::start_server().await;
+        return;
+    }
+
+    // Otherwise run both (local dev)
     tokio::spawn(async {
         server::start_server().await;
     });

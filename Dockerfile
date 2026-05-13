@@ -15,4 +15,5 @@ RUN apt-get update && apt-get install -y \
 COPY --from=builder /app/target/release/github-cli /usr/local/bin/github-cli
 ENV PORT=3001
 ENV PROJECT_PATH=.
+ENV SERVER_ONLY=true
 CMD ["github-cli"]
