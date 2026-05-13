@@ -1,19 +1,15 @@
-use crate::utils::printer;
 use std::fs;
+use colored::*;
 
-pub fn run(path: &str) {
-    printer::print_header(&format!("File: {}", path));
-
-    match fs::read_to_string(path) {
+pub fn run(filepath: &str) -> String {
+    match fs::read_to_string(filepath) {
         Ok(content) => {
-            // print with line numbers
-            for (index, line) in content.lines().enumerate() {
-                println!("{:>4} │ {}", index + 1, line);
-            }
-            println!();
+            let mut output = String::new();
+            output.push_str(&format!("\n{} --- Start of {} ---\n", ">>>".green().bold(), filepath.yellow()));
+            output.push_str(&content);
+            output.push_str(&format!("\n{} --- End of {} ---\n", "<<<".green().bold(), filepath.yellow()));
+            output
         }
-        Err(e) => {
-            printer::print_error(&format!("Cannot read '{}': {}", path, e));
-        }
+        Err(e) => format!("{} could not read {}: {}", "Error:".red().bold(), filepath.yellow(), e),
     }
 }

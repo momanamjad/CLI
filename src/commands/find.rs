@@ -1,58 +1,30 @@
-use crate::utils::printer;
-use std::fs;
-use std::path::Path;
+use walkdir::WalkDir;
+use colored::*;
 
-pub fn run(root: &str, query: &str) {
-    printer::print_header(&format!("Searching '{}' for: {}", root, query));
-    
-    let mut results: Vec<String> = Vec::new();
-    search_dir(root, query, &mut results);
+pub fn run(path: &str, target: &str) -> String {
+    let mut output = String::new();
+    output.push_str(&format!("{} searching for '{}' in {}...\n", "→".blue().bold(), target.yellow(), path.cyan()));
 
-    if results.is_empty() {
-        printer::print_error("No matches found.");
-    } else {
-        for path in &results {
-            printer::print_info(path);
-        }
-        println!();
-        printer::print_success(&format!("{} match(es) found", results.len()));
-    }
-    println!();
-}
-
-// recursive function — calls itself for each subfolder
-fn search_dir(dir: &str, query: &str, results: &mut Vec<String>) {
-    let path = Path::new(dir);
-
-    // skip folders we can't read (permissions, etc.)
-    let entries = match fs::read_dir(path) {
-        Ok(e)  => e,
-        Err(_) => return, // just skip this folder silently
-    };
-
-    for entry in entries {
-        let entry = match entry {
-            Ok(e)  => e,
-            Err(_) => continue, // skip bad entries, keep going
-        };
-
-        let entry_path = entry.path();
-        let name = entry.file_name().into_string().unwrap_or_default();
-
-        // skip node_modules and .git — too many files, not useful
-        if name == "node_modules" || name == ".git" || name == "target" {
+    let mut found = false;
+    for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
+        let path_str = entry.path().to_string_lossy();
+        if path_str.contains("node_modules") || path_str.contains(".git") || path_str.contains("target") || path_str.contains("dist") || path_str.contains("build") {
             continue;
         }
 
-        if entry_path.is_dir() {
-            // recursion: search inside this subfolder too
-            let sub = entry_path.to_string_lossy().to_string();
-            search_dir(&sub, query, results);
-        } else {
-            // check if filename contains the search query
-            if name.to_lowercase().contains(&query.to_lowercase()) {
-                results.push(entry_path.to_string_lossy().to_string());
+        if entry.file_name().to_string_lossy().contains(target) {
+            let path_str = entry.path().display().to_string();
+            if entry.file_type().is_dir() {
+                output.push_str(&format!("{} {}\n", "[DIR]".blue().bold(), path_str.blue()));
+            } else {
+                output.push_str(&format!("{} {}\n", "[FILE]".green().bold(), path_str.white()));
             }
+            found = true;
         }
     }
+
+    if !found {
+        output.push_str(&format!("{}\n", "No matches found.".red()));
+    }
+    output
 }

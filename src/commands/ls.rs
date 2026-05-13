@@ -1,42 +1,28 @@
-use crate::utils::printer;
 use std::fs;
+use colored::*;
 
-pub fn run(path: &str) {
-    printer::print_header(&format!("Contents of: {}", path));
-
-    match fs::read_dir(path) {
-        Ok(entries) => {
-            let mut dirs: Vec<String> = Vec::new();
-            let mut files: Vec<String> = Vec::new();
-
-            for entry in entries {
-                let entry = entry.unwrap();
-                let name = entry.file_name().into_string().unwrap();
-                let is_dir = entry.file_type().unwrap().is_dir();
-
-                if is_dir {
-                    dirs.push(format!("📁 {}/", name));
-                } else {
-                    files.push(format!("📄 {}", name));
-                }
-            }
-
-            dirs.sort();
-            files.sort();
-
-            for d in &dirs  { printer::print_info(d); }
-            for f in &files { printer::print_info(f); }
-
-            println!();
-            printer::print_success(&format!(
-                "{} folders, {} files",
-                dirs.len(),
-                files.len()
-            ));
-            println!();
+pub fn run(path: &str) -> String {
+    let mut output = String::new();
+    let entries = match fs::read_dir(path) {
+        Ok(e) => e,
+        Err(err) => {
+            return format!("{} {}: {}", "Error reading".red(), path.yellow(), err);
         }
-        Err(_) => {
-            printer::print_error(&format!("Cannot read path: '{}'", path));
+    };
+
+    output.push_str(&format!("\n{} listing contents of {}:\n", "→".blue().bold(), path.yellow()));
+    
+    for entry in entries {
+        if let Ok(entry) = entry {
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            let metadata = entry.metadata().unwrap();
+            
+            if metadata.is_dir() {
+                output.push_str(&format!("{}/\n", file_name.blue().bold()));
+            } else {
+                output.push_str(&format!("{}\n", file_name.white()));
+            }
         }
     }
+    output
 }
