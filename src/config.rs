@@ -17,7 +17,7 @@ impl Config {
 
         // Default config if file doesn't exist or is invalid
         let default_config = Config {
-            project_path: String::from("C:\\Users\\DELL\\Desktop\\github"),
+            project_path: std::env::var("PROJECT_PATH").unwrap_or_else(|_| ".".to_string()),
         };
         
         let _ = Self::save(&default_config);

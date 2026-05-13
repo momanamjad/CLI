@@ -5,13 +5,15 @@ use axum::{
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
-use std::collections::HashMap;
+// use std::net::SocketAddr; // Removed as it is now handled via string binding
 use std::path::Path;
 use futures_util::stream::StreamExt;
 use tower_http::cors::CorsLayer;
 use crate::config::Config;
-use crate::commands::{stats, deps, ls, search, git, help, about, pwd, cat, find, recent};
+use crate::commands::{stats, deps, ls, search, git};
+use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
+use std::io::{Read, Write};
+use futures_util::SinkExt;
 
 // --- Response Structs (reusing from commands where possible) ---
 
@@ -49,10 +51,11 @@ pub async fn start_server() {
         .route("/ws", get(handle_ws))
         .layer(CorsLayer::permissive());
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3001));
-    println!("Backend server listening on http://{}", addr);
+    let port = std::env::var("PORT").unwrap_or_else(|_| "3001".to_string());
+    let addr_str = format!("0.0.0.0:{}", port);
+    println!("Backend server listening on http://{}", addr_str);
     
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(&addr_str).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
 
@@ -106,59 +109,101 @@ async fn handle_ws(ws: WebSocketUpgrade) -> impl IntoResponse {
     ws.on_upgrade(handle_socket)
 }
 
-async fn handle_socket(mut socket: WebSocket) {
-    let config = Config::load();
-    
-    while let Some(Ok(msg)) = socket.next().await {
-        if let Message::Text(text) = msg {
-            let parts: Vec<&str> = text.split_whitespace().collect();
-            if parts.is_empty() { continue; }
+#[derive(Deserialize)]
+struct ResizeMessage {
+    #[serde(rename = "type")]
+    msg_type: String,
+    cols: u16,
+    rows: u16,
+}
 
-            let output = match parts[0] {
-                "help" => help::run(),
-                "about" => about::run(),
-                "pwd" => pwd::run(),
-                "ls" => {
-                    let path = if parts.len() > 1 { parts[1] } else { "." };
-                    let full_path = Path::new(&config.project_path).join(path);
-                    ls::run(&full_path.to_string_lossy())
-                }
-                "cat" => {
-                    if parts.len() < 2 {
-                        "Usage: cat <filepath>".to_string()
-                    } else {
-                        let full_path = Path::new(&config.project_path).join(parts[1]);
-                        cat::run(&full_path.to_string_lossy())
-                    }
-                }
-                "find" => {
-                    if parts.len() < 3 {
-                        "Usage: find <path> <filename>".to_string()
-                    } else {
-                        let full_path = Path::new(&config.project_path).join(parts[1]);
-                        find::run(&full_path.to_string_lossy(), parts[2])
-                    }
-                }
-                "stats" => stats::run(&config.project_path),
-                "deps" => deps::run(&config.project_path),
-                "search" => {
-                    if parts.len() < 2 {
-                        "Usage: search <keyword>".to_string()
-                    } else {
-                        search::run(&config.project_path, parts[1])
-                    }
-                }
-                "recent" => recent::run(&config.project_path),
-                "git-status" | "git status" => git::status(&config.project_path),
-                "git-log" | "git log" => {
-                    let n = if parts.len() > 1 { parts[1] } else { "5" };
-                    git::log(&config.project_path, n)
-                }
-                "git-branch" | "git branch" => git::branch(&config.project_path),
-                _ => format!("'{}' is not a recognized command.", parts[0]),
-            };
+async fn handle_socket(socket: WebSocket) {
+    let pty_system = NativePtySystem::default();
+    let pair = pty_system.openpty(PtySize {
+        rows: 50,
+        cols: 220,
+        pixel_width: 0,
+        pixel_height: 0,
+    }).unwrap();
 
-            let _ = socket.send(Message::Text(output)).await;
-        }
+    let shell = if cfg!(target_os = "windows") {
+        "powershell.exe"
+    } else {
+        "bash"
+    };
+    let mut cmd = CommandBuilder::new(shell);
+    if shell == "powershell.exe" {
+        cmd.args(&["-NoLogo"]);
     }
+    
+    let project_path = std::env::var("PROJECT_PATH").unwrap_or_else(|_| ".".to_string());
+    cmd.cwd(project_path);
+
+    let mut child = pair.slave.spawn_command(cmd).unwrap();
+    
+    let mut reader = pair.master.try_clone_reader().unwrap();
+    let mut writer = pair.master.take_writer().unwrap();
+    let master = pair.master;
+
+    let (mut ws_sender, mut ws_receiver) = socket.split();
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(100);
+
+    // Task 1: PTY stdout -> Channel -> WebSocket
+    tokio::task::spawn_blocking(move || {
+        let mut buf = [0u8; 4096];
+        while let Ok(n) = reader.read(&mut buf) {
+            if n == 0 { break; }
+            if tx.blocking_send(buf[..n].to_vec()).is_err() {
+                break;
+            }
+        }
+    });
+
+    let ws_send_task = tokio::task::spawn(async move {
+        while let Some(data) = rx.recv().await {
+            if ws_sender.send(Message::Binary(data)).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    // Task 2: WebSocket -> PTY stdin / Resize
+    let ws_recv_task = tokio::task::spawn(async move {
+        while let Some(Ok(msg)) = ws_receiver.next().await {
+            match msg {
+                Message::Binary(data) => {
+                    let _ = writer.write_all(&data);
+                    let _ = writer.flush();
+                }
+                Message::Text(text) => {
+                    // Try to parse as ResizeMessage first
+                    if let Ok(resize) = serde_json::from_str::<ResizeMessage>(&text) {
+                        if resize.msg_type == "resize" {
+                            let _ = master.resize(PtySize {
+                                rows: resize.rows,
+                                cols: resize.cols,
+                                pixel_width: 0,
+                                pixel_height: 0,
+                            });
+                            continue; // Skip writing this to the PTY
+                        }
+                    }
+                    
+                    // Not a resize message, write as raw input
+                    let _ = writer.write_all(text.as_bytes());
+                    let _ = writer.flush();
+                }
+                _ => {}
+            }
+        }
+    });
+
+    // Wait for either task to finish
+    tokio::select! {
+        _ = ws_send_task => {},
+        _ = ws_recv_task => {},
+    }
+
+    // Kill the process on disconnect
+    let _ = child.kill();
 }
