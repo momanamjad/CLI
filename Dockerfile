@@ -25,11 +25,14 @@ RUN git config --global user.name "github-cli" \
     && git config --global init.defaultBranch main
 
 COPY --from=builder /app/target/release/github-cli /usr/local/bin/github-cli
+COPY start.sh /start.sh
+RUN chmod +x /start.sh
 
 WORKDIR /workspace
+RUN mkdir -p /workspace/project
 
 ENV SERVER_ONLY=true
 ENV PORT=3001
-ENV PROJECT_PATH=/workspace
+ENV PROJECT_PATH=/workspace/project
 
-CMD ["github-cli"]
+CMD ["/start.sh"]
