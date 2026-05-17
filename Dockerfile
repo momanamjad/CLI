@@ -1,6 +1,10 @@
-FROM debian:bookworm-slim
+FROM rust:1.85-slim AS builder
+WORKDIR /app
+RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+COPY . .
+RUN cargo build --release
 
-# Install full dev environment
+FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y \
     git \
     curl \
@@ -10,20 +14,16 @@ RUN apt-get update && apt-get install -y \
     wget \
     vim \
     tree \
-    htop \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js 20
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Configure git
 RUN git config --global user.name "github-cli" \
     && git config --global user.email "cli@github-clone.dev" \
     && git config --global init.defaultBranch main
 
-# Clone the GitHub clone project into the container
 COPY --from=builder /app/target/release/github-cli /usr/local/bin/github-cli
 
 WORKDIR /workspace
