@@ -1,85 +1,100 @@
-# GitHub CLI 🚀
+# github-cli
 
-A powerful, production-ready Rust terminal and backend server designed for interacting with modern web projects (React, Vite, Tailwind, etc.). This tool combines a feature-rich CLI with a robust REST API and WebSocket-based PTY for remote terminal access.
+A production-grade Rust CLI tool and WebSocket PTY server that powers a real browser-based terminal — the same architecture used by GitHub Codespaces, Replit, and VS Code Server.
 
-## 🌟 Features
+![Rust](https://img.shields.io/badge/Rust-1.85-orange?logo=rust)
+![Railway](https://img.shields.io/badge/Deployed-Railway-purple?logo=railway)
+![License](https://img.shields.io/badge/license-MIT-blue)
 
-- **Project Insights**: Get instant statistics and dependency analysis of your web projects.
-- **Git Integration**: Built-in commands for `git status`, `git log`, and `git branch`.
-- **Advanced File Navigation**: Explore your project with `ls`, `cat`, `find`, and `search` functionality.
-- **Interactive CLI**: A sleek, colored terminal interface for local development.
-- **REST API Backend**: Exposes project data via standard HTTP endpoints (Stats, Deps, Search, Git).
-- **Live Terminal (WebSocket PTY)**: Real-time terminal access via WebSockets, allowing you to run shell commands through the backend.
-- **Cloud-Ready**: Optimized for deployment on platforms like Railway with `SERVER_ONLY` mode and Docker support.
+## 🌐 Live Demo
+**[github-kappa-two.vercel.app/terminal](https://github-kappa-two.vercel.app/terminal)**
+
+Open the link, click the terminal, and type real bash commands like `git log`, `ls`, `cat package.json`.
+
+## 🏗️ Architecture
+
+```text
++-------------------+        WebSocket         +---------------------+
+| Browser / React   |  <-------------------->  | Rust axum Server    |
+| (xterm.js)        |       (JSON/Binary)      | (portable-pty)      |
++-------------------+                          +---------------------+
+                                                          |
+                                                          v
+                                                 +-------------------+
+                                                 | Real Shell        |
+                                                 | (bash/ConPTY)     |
+                                                 +-------------------+
+```
+
+## ✨ Features
+- Real PTY terminal in the browser (not a fake shell)
+- Live dashboard: LOC counter, file distribution, dependency list, git status
+- REST API for project intelligence
+- Copy/paste support (Ctrl+Shift+C/V, right-click)
+- Terminal resize support
+- Cross-platform: ConPTY on Windows, bash on Linux
+- Auto-clones target project on startup
 
 ## 🛠️ Tech Stack
 
-- **Language**: [Rust](https://www.rust-lang.org/) (2024 Edition)
-- **Web Framework**: [Axum](https://github.com/tokio-rs/axum)
-- **Runtime**: [Tokio](https://tokio.rs/)
-- **Terminal PTY**: [Portable-PTY](https://github.com/wez/wezterm/tree/main/portable-pty)
-- **Serialization**: [Serde](https://serde.rs/) & [TOML](https://github.com/toml-rs/toml)
-- **Styling**: [Colored](https://github.com/mackwic/colored) & [PrettyTable](https://github.com/phstc/rust-prettytable)
+| Technology      | Purpose                                    |
+|-----------------|--------------------------------------------|
+| **Rust**        | Core server language                       |
+| **axum**        | HTTP and WebSocket routing framework       |
+| **tokio**       | Asynchronous runtime                       |
+| **portable-pty**| Pseudo-terminal interface (PTY)            |
+| **serde**       | JSON serialization and deserialization     |
+| **xterm.js**    | Web-based terminal emulator                |
+| **React 19**    | Frontend UI rendering                      |
 
-## 🚀 Getting Started
+## 📡 API Endpoints
 
-### Prerequisites
+| Method | Endpoint      | Description                                      |
+|--------|---------------|--------------------------------------------------|
+| GET    | `/stats`      | Returns project file stats and LOC counts        |
+| GET    | `/deps`       | Lists `package.json` dependencies if present     |
+| GET    | `/ls`         | Lists files in directory (accepts `?path=...`)   |
+| GET    | `/git/status` | Returns current `git status` output              |
+| GET    | `/git/log`    | Returns `git log` output (accepts `?n=...`)      |
+| GET    | `/git/branch` | Returns current branches                         |
+| POST   | `/search`     | Searches for a query string across files         |
+| WS     | `/ws`         | WebSocket connection for the real-time PTY shell |
 
-- [Rust](https://www.rust-lang.org/tools/install) installed on your system.
+## 🔧 How It Works
 
-### Configuration
+A Pseudo-Terminal (PTY) allows a program to emulate a real terminal device. Normally, terminal programs like `bash` expect to be attached to an actual terminal emulator window (like iTerm or Windows Terminal). By using `portable-pty`, our Rust server creates a "fake" terminal device in memory, allowing `bash` to run exactly as if a human was sitting at a keyboard, complete with colors, formatting, and interactive program support (like `vim` or `top`).
 
-Create or modify `config.toml` in the project root to point to your target project:
+The connection between the browser and this PTY is bridged over WebSockets. When you type a character in the browser using `xterm.js`, it sends a WebSocket message to the Rust server. Rust feeds that keystroke directly into the PTY's standard input. When the shell produces output (like text, ANSI colors, or cursor movements), the PTY captures it, Rust reads it, and blasts those raw bytes down the WebSocket to `xterm.js` for rendering. 
 
-```toml
-project_path = 'C:\path\to\your\project'
-```
+Rust was chosen because bridging binary streams between a PTY and a WebSocket requires extremely low-latency, memory-safe, and highly concurrent execution. `tokio` effortlessly manages the asynchronous streams, while Rust's strict memory guarantees prevent the kind of buffer overflow and resource leak vulnerabilities common when interfacing directly with OS-level pipes and processes in C or C++.
 
-### Running Locally
+## 🚀 Local Development
 
-To start both the CLI and the backend server:
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/momanamjad/CLI.git github-cli
+   cd github-cli
+   ```
 
-```bash
-cargo run
-```
+2. **Start the backend server:**
+   ```bash
+   cargo run
+   ```
+   *The server starts on port 3001.*
 
-### Server-Only Mode (Cloud Deployment)
+3. **Verify it's running:**
+   Open `http://localhost:3001/stats` in your browser.
 
-If you only want to run the backend server (e.g., for Railway or Docker):
+4. **Start the React frontend** (in your separate frontend directory):
+   ```bash
+   npm run dev
+   ```
 
-```bash
-# Windows
-$env:SERVER_ONLY="1"; cargo run
+## 🏛️ Same Architecture As
+- GitHub Codespaces
+- Replit
+- VS Code Server
+- Railway shell tabs
 
-# Linux/macOS
-SERVER_ONLY=1 cargo run
-```
-
-## 🌐 API Endpoints
-
-The backend server runs by default on `http://localhost:3001` (or the port specified by the `PORT` environment variable).
-
-| Endpoint | Method | Description |
-| :--- | :--- | :--- |
-| `/` | `GET` | Health check |
-| `/stats` | `GET` | Get project statistics |
-| `/deps` | `GET` | Get project dependencies |
-| `/ls?path=.` | `GET` | List files in a directory |
-| `/search` | `POST` | Search for keywords in the project |
-| `/git/status` | `GET` | Get git status |
-| `/git/log?n=5` | `GET` | Get recent git logs |
-| `/git/branch` | `GET` | Get current git branch |
-| `/ws` | `WS` | Real-time terminal (PTY) connection |
-
-## 📦 Docker Support
-
-You can build and run the project using Docker:
-
-```bash
-docker build -t github-cli .
-docker run -p 3001:3001 -e PROJECT_PATH=/app/my-project github-cli
-```
-
-## 📜 License
-
-This project was built as part of a Rust learning journey. Feel free to explore, modify, and learn!
+## 👤 Author
+Moman Amjad — [github.com/momanamjad](https://github.com/momanamjad)
