@@ -78,9 +78,17 @@ pub async fn start_server() {
 
 // --- Handlers ---
 
-async fn handle_stats() -> Json<stats::ProjectStats> {
-    let config = Config::load();
-    Json(stats::get_data(&config.project_path))
+#[derive(Deserialize)]
+pub struct PathQuery {
+    pub path: Option<String>,
+}
+
+async fn handle_stats(Query(query): Query<PathQuery>) -> Json<stats::ProjectStats> {
+    let path = query.path.unwrap_or_else(|| {
+        let config = Config::load();
+        config.project_path
+    });
+    Json(stats::get_data(&path))
 }
 
 async fn handle_deps() -> Json<Option<deps::DepsData>> {
