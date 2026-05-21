@@ -37,6 +37,21 @@ pub struct LogQuery {
     pub n: Option<String>,
 }
 
+// --- File Write Request ---
+
+#[derive(Deserialize)]
+struct WriteFileRequest {
+    path: String,
+    content: String,
+}
+
+async fn handle_write_file(Json(req): Json<WriteFileRequest>) -> Json<GitResponse> {
+    match std::fs::write(&req.path, &req.content) {
+        Ok(_) => Json(GitResponse { output: "File saved successfully".to_string() }),
+        Err(e) => Json(GitResponse { output: format!("Error: {}", e) }),
+    }
+}
+
 // --- Server Entry Point ---
 
 pub async fn start_server() {
@@ -50,6 +65,7 @@ pub async fn start_server() {
         .route("/git/log", get(handle_git_log))
         .route("/git/branch", get(handle_git_branch))
         .route("/ws", get(handle_ws))
+        .route("/file", post(handle_write_file))
         .layer(CorsLayer::permissive());
 
     let port = std::env::var("PORT").unwrap_or_else(|_| "3001".to_string());
