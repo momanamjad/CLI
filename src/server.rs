@@ -5,7 +5,6 @@ use axum::{
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
-// use std::net::SocketAddr; // Removed as it is now handled via string binding
 use std::path::Path;
 use futures_util::stream::StreamExt;
 use tower_http::cors::CorsLayer;
@@ -15,7 +14,7 @@ use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use std::io::{Read, Write};
 use futures_util::SinkExt;
 
-// --- Response Structs (reusing from commands where possible) ---
+// --- Response Structs ---
 
 #[derive(Serialize)]
 pub struct GitResponse {
@@ -35,6 +34,117 @@ pub struct LsQuery {
 #[derive(Deserialize)]
 pub struct LogQuery {
     pub n: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct PathQuery {
+    pub path: Option<String>,
+}
+
+// --- System Metrics ---
+
+#[derive(Serialize)]
+pub struct SystemMetrics {
+    pub cpu_usage: f32,
+    pub ram_used_mb: u64,
+    pub ram_total_mb: u64,
+    pub disk_used_gb: f32,
+    pub disk_total_gb: f32,
+    pub uptime_seconds: u64,
+}
+
+fn read_ram() -> (u64, u64) {
+    let content = std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
+    let mut total = 0u64;
+    let mut available = 0u64;
+    for line in content.lines() {
+        if line.starts_with("MemTotal:") {
+            total = line.split_whitespace().nth(1).and_then(|v| v.parse().ok()).unwrap_or(0);
+        } else if line.starts_with("MemAvailable:") {
+            available = line.split_whitespace().nth(1).and_then(|v| v.parse().ok()).unwrap_or(0);
+        }
+    }
+    let used_kb = total.saturating_sub(available);
+    (used_kb / 1024, total / 1024)
+}
+
+fn read_cpu_stat() -> (u64, u64) {
+    let content = std::fs::read_to_string("/proc/stat").unwrap_or_default();
+    let first_line = content.lines().next().unwrap_or("");
+    let nums: Vec<u64> = first_line.split_whitespace()
+        .skip(1)
+        .filter_map(|v| v.parse().ok())
+        .collect();
+    if nums.len() < 4 {
+        return (0, 1);
+    }
+    let idle = nums[3];
+    let total: u64 = nums.iter().sum();
+    (idle, total)
+}
+
+fn read_uptime() -> u64 {
+    let content = std::fs::read_to_string("/proc/uptime").unwrap_or_default();
+    content.split_whitespace()
+        .next()
+        .and_then(|v| v.parse::<f64>().ok())
+        .map(|v| v as u64)
+        .unwrap_or(0)
+}
+
+fn read_disk() -> (f32, f32) {
+    let output = std::process::Command::new("df")
+        .args(&["/workspace", "--output=used,size", "-BM"])
+        .output()
+        .ok();
+    if let Some(out) = output {
+        let text = String::from_utf8_lossy(&out.stdout).to_string();
+        let data_line = text.lines().nth(1).unwrap_or("");
+        let parts: Vec<&str> = data_line.split_whitespace().collect();
+        if parts.len() >= 2 {
+            let used = parts[0].trim_end_matches('M').parse::<f32>().unwrap_or(0.0) / 1024.0;
+            let total = parts[1].trim_end_matches('M').parse::<f32>().unwrap_or(0.0) / 1024.0;
+            return (used, total);
+        }
+    }
+    (0.0, 0.0)
+}
+
+async fn handle_metrics() -> Json<SystemMetrics> {
+    let (idle1, total1) = read_cpu_stat();
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let (idle2, total2) = read_cpu_stat();
+
+    let idle_delta = idle2.saturating_sub(idle1) as f32;
+    let total_delta = total2.saturating_sub(total1) as f32;
+    let cpu_usage = if total_delta > 0.0 {
+        (1.0 - idle_delta / total_delta) * 100.0
+    } else {
+        0.0
+    };
+
+    let (ram_used_mb, ram_total_mb) = read_ram();
+    let uptime_seconds = read_uptime();
+    let (disk_used_gb, disk_total_gb) = read_disk();
+
+    Json(SystemMetrics {
+        cpu_usage,
+        ram_used_mb,
+        ram_total_mb,
+        disk_used_gb,
+        disk_total_gb,
+        uptime_seconds,
+    })
+}
+
+// --- File Read Endpoint ---
+
+async fn handle_read_file(Query(query): Query<PathQuery>) -> Json<serde_json::Value> {
+    let path = query.path.unwrap_or_default();
+    match std::fs::read_to_string(&path) {
+        Ok(content) => Json(serde_json::json!({"content": content})),
+        Err(e) => Json(serde_json::json!({"error": e.to_string()})),
+    }
 }
 
 // --- File Write Request ---
@@ -65,7 +175,8 @@ pub async fn start_server() {
         .route("/git/log", get(handle_git_log))
         .route("/git/branch", get(handle_git_branch))
         .route("/ws", get(handle_ws))
-        .route("/file", post(handle_write_file))
+        .route("/metrics", get(handle_metrics))
+        .route("/file", get(handle_read_file).post(handle_write_file))
         .layer(CorsLayer::permissive());
 
     let port = std::env::var("PORT").unwrap_or_else(|_| "3001".to_string());
@@ -77,11 +188,6 @@ pub async fn start_server() {
 }
 
 // --- Handlers ---
-
-#[derive(Deserialize)]
-pub struct PathQuery {
-    pub path: Option<String>,
-}
 
 async fn handle_stats(Query(query): Query<PathQuery>) -> Json<stats::ProjectStats> {
     let path = query.path.unwrap_or_else(|| {
@@ -136,10 +242,8 @@ async fn handle_ws(ws: WebSocketUpgrade) -> impl IntoResponse {
 
 #[derive(Deserialize)]
 struct ResizeMessage {
-    #[serde(rename = "type")]
-    msg_type: String,
-    cols: u16,
-    rows: u16,
+    cols: Option<u16>,
+    rows: Option<u16>,
 }
 
 async fn handle_socket(socket: WebSocket) {
@@ -171,28 +275,30 @@ async fn handle_socket(socket: WebSocket) {
     let master = pair.master;
 
     let (mut ws_sender, mut ws_receiver) = socket.split();
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(100);
+    // Channel now carries axum ws Message so we can send both Binary and Text
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<Message>(100);
+    let tx_ping = tx.clone();
 
     // Task 1: PTY stdout -> Channel -> WebSocket
     tokio::task::spawn_blocking(move || {
         let mut buf = [0u8; 4096];
         while let Ok(n) = reader.read(&mut buf) {
             if n == 0 { break; }
-            if tx.blocking_send(buf[..n].to_vec()).is_err() {
+            if tx.blocking_send(Message::Binary(buf[..n].to_vec())).is_err() {
                 break;
             }
         }
     });
 
     let ws_send_task = tokio::task::spawn(async move {
-        while let Some(data) = rx.recv().await {
-            if ws_sender.send(Message::Binary(data)).await.is_err() {
+        while let Some(msg) = rx.recv().await {
+            if ws_sender.send(msg).await.is_err() {
                 break;
             }
         }
     });
 
-    // Task 2: WebSocket -> PTY stdin / Resize
+    // Task 2: WebSocket -> PTY stdin / Resize / Ping-Pong
     let ws_recv_task = tokio::task::spawn(async move {
         while let Some(Ok(msg)) = ws_receiver.next().await {
             match msg {
@@ -201,20 +307,33 @@ async fn handle_socket(socket: WebSocket) {
                     let _ = writer.flush();
                 }
                 Message::Text(text) => {
-                    // Try to parse as ResizeMessage first
-                    if let Ok(resize) = serde_json::from_str::<ResizeMessage>(&text) {
-                        if resize.msg_type == "resize" {
-                            let _ = master.resize(PtySize {
-                                rows: resize.rows,
-                                cols: resize.cols,
-                                pixel_width: 0,
-                                pixel_height: 0,
-                            });
-                            continue; // Skip writing this to the PTY
+                    // Try to parse as a control message first
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
+                        let msg_type = parsed.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+                        if msg_type == "ping" {
+                            // Immediately send pong back over WebSocket
+                            let pong = serde_json::json!({"type": "pong"}).to_string();
+                            let _ = tx_ping.send(Message::Text(pong)).await;
+                            continue;
+                        }
+
+                        if msg_type == "resize" {
+                            if let Ok(resize) = serde_json::from_value::<ResizeMessage>(parsed) {
+                                if let (Some(cols), Some(rows)) = (resize.cols, resize.rows) {
+                                    let _ = master.resize(PtySize {
+                                        rows,
+                                        cols,
+                                        pixel_width: 0,
+                                        pixel_height: 0,
+                                    });
+                                }
+                            }
+                            continue;
                         }
                     }
-                    
-                    // Not a resize message, write as raw input
+
+                    // Not a control message — write raw text to PTY
                     let _ = writer.write_all(text.as_bytes());
                     let _ = writer.flush();
                 }
