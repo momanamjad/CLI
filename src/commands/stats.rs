@@ -11,11 +11,13 @@ pub struct ProjectStats {
     pub total_lines: usize,
     pub file_types: HashMap<String, usize>,
     pub largest_files: Vec<(String, u64)>,
+    pub avg_size: u64,
 }
 
 pub fn get_data(project_path: &str) -> ProjectStats {
     let mut total_files = 0;
     let mut total_lines = 0;
+    let mut total_bytes = 0;
     let mut extension_counts: HashMap<String, usize> = HashMap::new();
     let mut largest_files: Vec<(String, u64)> = Vec::new();
 
@@ -38,7 +40,9 @@ pub fn get_data(project_path: &str) -> ProjectStats {
         }
 
         if let Ok(metadata) = entry.metadata() {
-            largest_files.push((path.display().to_string(), metadata.len()));
+            let file_size = metadata.len();
+            total_bytes += file_size;
+            largest_files.push((path.display().to_string(), file_size));
         }
 
         if let Ok(file) = File::open(path) {
@@ -49,11 +53,18 @@ pub fn get_data(project_path: &str) -> ProjectStats {
 
     largest_files.sort_by(|a, b| b.1.cmp(&a.1));
 
+    let avg_size = if total_files > 0 {
+        total_bytes / total_files as u64
+    } else {
+        0
+    };
+
     ProjectStats {
         total_files,
         total_lines,
         file_types: extension_counts,
         largest_files,
+        avg_size,
     }
 }
 
