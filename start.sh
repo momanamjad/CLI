@@ -10,6 +10,9 @@ else
   cd /workspace/project && git pull
 fi
 
+echo "Installing dependencies..."
+cd /workspace/project && npm install
+
 export PROJECT_PATH=/workspace/project
 export SERVER_ONLY=true
 export GIT_PAGER=cat
