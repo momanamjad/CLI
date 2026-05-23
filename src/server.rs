@@ -162,6 +162,60 @@ async fn handle_write_file(Json(req): Json<WriteFileRequest>) -> Json<GitRespons
     }
 }
 
+// --- Ports Endpoint ---
+
+fn extract_port(line: &str) -> Option<serde_json::Value> {
+    // Parse lines like: LISTEN 0  128  0.0.0.0:3001  ...  users:(("github-cli",pid=1,fd=7))
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    for part in &parts {
+        if let Some(colon_pos) = part.rfind(':') {
+            let port_str = &part[colon_pos + 1..];
+            if let Ok(port_num) = port_str.parse::<u16>() {
+                // Try to extract process name from users:((...)) section
+                let process = if let Some(users_start) = line.find("users:(") {
+                    let users_section = &line[users_start..];
+                    if let Some(name_start) = users_section.find('"') {
+                        let after_quote = &users_section[name_start + 1..];
+                        if let Some(name_end) = after_quote.find('"') {
+                            after_quote[..name_end].to_string()
+                        } else {
+                            "unknown".to_string()
+                        }
+                    } else {
+                        "unknown".to_string()
+                    }
+                } else {
+                    parts.last().unwrap_or(&"unknown").to_string()
+                };
+                return Some(serde_json::json!({
+                    "port": port_num,
+                    "process": process,
+                    "status": "LISTEN"
+                }));
+            }
+        }
+    }
+    None
+}
+
+async fn handle_ports() -> Json<serde_json::Value> {
+    let output = std::process::Command::new("sh")
+        .args(["-c", "ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .unwrap_or_default();
+
+    let mut ports = Vec::new();
+    for line in output.lines().skip(1) {
+        if line.contains("LISTEN") || (line.contains("tcp") && line.contains("LISTEN")) {
+            if let Some(port) = extract_port(line) {
+                ports.push(port);
+            }
+        }
+    }
+    Json(serde_json::json!({ "ports": ports }))
+}
+
 // --- Server Entry Point ---
 
 pub async fn start_server() {
@@ -177,6 +231,7 @@ pub async fn start_server() {
         .route("/ws", get(handle_ws))
         .route("/metrics", get(handle_metrics))
         .route("/file", get(handle_read_file).post(handle_write_file))
+        .route("/ports", get(handle_ports))
         .layer(CorsLayer::permissive());
 
     let port = std::env::var("PORT").unwrap_or_else(|_| "3001".to_string());
