@@ -141,6 +141,18 @@ async fn handle_metrics() -> Json<SystemMetrics> {
 
 async fn handle_read_file(Query(query): Query<PathQuery>) -> Json<serde_json::Value> {
     let path = query.path.unwrap_or_default();
+    let path_obj = std::path::Path::new(&path);
+
+    // Check if path exists
+    if !path_obj.exists() {
+        return Json(serde_json::json!({"error": format!("Path does not exist: {}", path)}));
+    }
+
+    // Check if path is a directory (not a file)
+    if path_obj.is_dir() {
+        return Json(serde_json::json!({"error": format!("Path is a directory, not a file: {}", path)}));
+    }
+
     match std::fs::read_to_string(&path) {
         Ok(content) => Json(serde_json::json!({"content": content})),
         Err(e) => Json(serde_json::json!({"error": e.to_string()})),
