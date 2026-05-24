@@ -199,20 +199,70 @@ fn extract_port(line: &str) -> Option<serde_json::Value> {
 }
 
 async fn handle_ports() -> Json<serde_json::Value> {
-    let output = std::process::Command::new("sh")
-        .args(["-c", "ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null"])
+    // Try ss first (needs iproute2), fall back to /proc/net/tcp
+    let ss_output = std::process::Command::new("sh")
+        .args(["-c", "ss -tlnp 2>/dev/null | grep LISTEN"])
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
         .unwrap_or_default();
 
     let mut ports = Vec::new();
-    for line in output.lines().skip(1) {
-        if line.contains("LISTEN") || (line.contains("tcp") && line.contains("LISTEN")) {
-            if let Some(port) = extract_port(line) {
-                ports.push(port);
+
+    if !ss_output.trim().is_empty() {
+        // Parse ss output
+        for line in ss_output.lines() {
+            if line.contains("LISTEN") {
+                if let Some(port) = extract_port(line) {
+                    ports.push(port);
+                }
+            }
+        }
+    } else {
+        // Fallback: parse /proc/net/tcp (hex port values)
+        if let Ok(content) = std::fs::read_to_string("/proc/net/tcp") {
+            for line in content.lines().skip(1) {
+                let cols: Vec<&str> = line.split_whitespace().collect();
+                if cols.len() >= 4 && cols[3] == "0A" {
+                    // state 0A = LISTEN
+                    // local_address is "hex_ip:hex_port"
+                    if let Some(port_hex) = cols[1].split(':').nth(1) {
+                        if let Ok(port_num) = u16::from_str_radix(port_hex, 16) {
+                            if port_num > 0 {
+                                ports.push(serde_json::json!({
+                                    "port": port_num,
+                                    "process": "unknown",
+                                    "status": "LISTEN"
+                                }));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Also try /proc/net/tcp6
+        if let Ok(content) = std::fs::read_to_string("/proc/net/tcp6") {
+            for line in content.lines().skip(1) {
+                let cols: Vec<&str> = line.split_whitespace().collect();
+                if cols.len() >= 4 && cols[3] == "0A" {
+                    if let Some(port_hex) = cols[1].split(':').nth(1) {
+                        if let Ok(port_num) = u16::from_str_radix(port_hex, 16) {
+                            if port_num > 0 {
+                                // avoid duplicates already in tcp list
+                                if !ports.iter().any(|p| p["port"] == port_num) {
+                                    ports.push(serde_json::json!({
+                                        "port": port_num,
+                                        "process": "unknown",
+                                        "status": "LISTEN"
+                                    }));
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
+
     Json(serde_json::json!({ "ports": ports }))
 }
 
