@@ -3,13 +3,14 @@ use colored::*;
 use crate::commands::{help, about, ls, cat, find, pwd, open, stats, deps, search, recent, git};
 use crate::config::Config;
 use crate::server;
+use walkdir::WalkDir;
 
 pub struct CommandHandler {
     config: Config,
 }
 
 pub async fn run() {
-    let handler = CommandHandler::new();
+    let mut handler = CommandHandler::new();
     handler.run().await;
 }
 
@@ -20,7 +21,7 @@ impl CommandHandler {
         }
     }
 
-    pub async fn run(&self) {
+    pub async fn run(&mut self) {
         println!("{}", "╔══════════════════════════════════╗".bright_green());
         println!("║       {}      ║", "GitHub Clone CLI v0.2".bold().white());
         println!("║  {} ║", "Production-ready Rust Terminal".dimmed());
@@ -32,8 +33,10 @@ impl CommandHandler {
             io::stdout().flush().unwrap();
 
             let mut input = String::new();
-            if io::stdin().read_line(&mut input).is_err() {
-                continue;
+            match io::stdin().read_line(&mut input) {
+                Ok(0) => break, // EOF reached, exit loop
+                Ok(_) => {},
+                Err(_) => continue,
             }
             let input = input.trim();
             let parts: Vec<&str> = input.split_whitespace().collect();
@@ -85,6 +88,75 @@ impl CommandHandler {
                     println!("{}", git::log(&self.config.project_path, n));
                 }
                 "git-branch" => println!("{}", git::branch(&self.config.project_path)),
+                "login" => {
+                    if parts.len() < 3 {
+                        println!("Usage: login <email> <password>");
+                    } else {
+                        let email = parts[1];
+                        let password = parts[2];
+                        let mut temp_config = self.config.clone();
+                        match handle_login(email, password, &mut temp_config).await {
+                            Ok(_token) => {
+                                self.config = temp_config;
+                                println!("{}", "Login successful! Token saved.".green());
+                            }
+                            Err(err) => {
+                                println!("{} {}", "Login failed:".red(), err);
+                            }
+                        }
+                    }
+                }
+                "remote-create" => {
+                    if parts.len() < 2 {
+                        println!("Usage: remote-create <repo_name> [description]");
+                    } else {
+                        let name = parts[1];
+                        let desc = if parts.len() > 2 { parts[2] } else { "" };
+                        match handle_remote_create(name, desc, &self.config).await {
+                            Ok(repo_id) => {
+                                println!("{} {}", "Repository created successfully! ID:".green(), repo_id);
+                            }
+                            Err(err) => {
+                                println!("{} {}", "Failed to create remote repository:".red(), err);
+                            }
+                        }
+                    }
+                }
+                "remote-link" => {
+                    if parts.len() < 2 {
+                        println!("Usage: remote-link <repo_id>");
+                    } else {
+                        let id = parts[1];
+                        match handle_remote_link(id, &self.config).await {
+                            Ok(name) => {
+                                println!("{} {}", "Repository linked successfully! Name:".green(), name);
+                            }
+                            Err(err) => {
+                                println!("{} {}", "Failed to link repository:".red(), err);
+                            }
+                        }
+                    }
+                }
+                "remote-pull" => {
+                    match handle_remote_pull(&self.config).await {
+                        Ok(_) => {
+                            println!("{}", "Repository files pulled successfully!".green());
+                        }
+                        Err(err) => {
+                            println!("{} {}", "Failed to pull files:".red(), err);
+                        }
+                    }
+                }
+                "remote-push" => {
+                    match handle_remote_push(&self.config).await {
+                        Ok(_) => {
+                            println!("{}", "Repository files pushed successfully!".green());
+                        }
+                        Err(err) => {
+                            println!("{} {}", "Failed to push files:".red(), err);
+                        }
+                    }
+                }
                 "exit" => {
                     println!("{}", "Goodbye!".bright_red());
                     break;
@@ -96,4 +168,284 @@ impl CommandHandler {
             println!(); // Extra newline for readability
         }
     }
+}
+
+async fn handle_login(email: &str, password: &str, config: &mut Config) -> Result<String, String> {
+    let api_url = config.api_url.as_ref().unwrap_or(&"http://localhost:5000/api".to_string()).clone();
+    let client = reqwest::Client::new();
+    
+    let res = client.post(&format!("{}/auth/login", api_url))
+        .json(&serde_json::json!({
+            "email": email,
+            "password": password
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    if !res.status().is_success() {
+        let err_text = res.text().await.unwrap_or_default();
+        return Err(format!("Login failed: {}", err_text));
+    }
+
+    let json_resp: serde_json::Value = res.json()
+        .await
+        .map_err(|e| format!("Invalid JSON response: {}", e))?;
+
+    let token = json_resp["data"]["accessToken"].as_str()
+        .ok_or("Access token not found in login response.")?
+        .to_string();
+
+    // Save token to config.toml
+    config.token = Some(token.clone());
+    Config::save(config).map_err(|e| format!("Failed to save config: {}", e))?;
+
+    Ok(token)
+}
+
+async fn handle_remote_create(name: &str, desc: &str, config: &Config) -> Result<String, String> {
+    let token = config.token.as_ref().ok_or("Not logged in. Please run 'login <email> <password>' first.")?;
+    let api_url = config.api_url.as_ref().unwrap_or(&"http://localhost:5000/api".to_string()).clone();
+    let client = reqwest::Client::new();
+
+    let res = client.post(&format!("{}/repos", api_url))
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({
+            "name": name,
+            "description": desc,
+            "visibility": "public"
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    if !res.status().is_success() {
+        let err_text = res.text().await.unwrap_or_default();
+        return Err(format!("Create repository failed: {}", err_text));
+    }
+
+    let json_resp: serde_json::Value = res.json()
+        .await
+        .map_err(|e| format!("Invalid response: {}", e))?;
+
+    // Extract repository ID
+    let repo_id = json_resp["data"]["_id"].as_str()
+        .or_else(|| json_resp["data"]["id"].as_str())
+        .ok_or("Repository ID not found in server response.")?
+        .to_string();
+
+    // Save repository metadata locally in .gh-repo.json
+    let meta = serde_json::json!({
+        "name": name,
+        "id": repo_id
+    });
+    std::fs::write(".gh-repo.json", serde_json::to_string_pretty(&meta).unwrap())
+        .map_err(|e| format!("Failed to save repo config locally: {}", e))?;
+
+    Ok(repo_id)
+}
+
+async fn handle_remote_push(config: &Config) -> Result<(), String> {
+    let token = config.token.as_ref().ok_or("Not logged in. Please run 'login <email> <password>' first.")?;
+    let api_url = config.api_url.as_ref().unwrap_or(&"http://localhost:5000/api".to_string()).clone();
+
+    // Read target repository ID from a local file `.gh-repo.json`
+    let repo_meta_path = ".gh-repo.json";
+    if !std::path::Path::new(repo_meta_path).exists() {
+        return Err("No remote repository configured. Run 'remote-create <repo_name>' in this folder first.".to_string());
+    }
+    
+    let meta_content = std::fs::read_to_string(repo_meta_path)
+        .map_err(|e| format!("Failed to read repo metadata: {}", e))?;
+    let meta: serde_json::Value = serde_json::from_str(&meta_content)
+        .map_err(|e| format!("Failed to parse repo metadata: {}", e))?;
+    
+    let repo_id = meta["id"].as_str().ok_or("Invalid repository ID in metadata file.")?;
+
+    println!("Scanning project path: {} ...", config.project_path);
+
+    let mut files = Vec::new();
+
+    for entry in WalkDir::new(&config.project_path) {
+        let entry = entry.map_err(|e| format!("Error scanning directory: {}", e))?;
+        let path = entry.path();
+        
+        // Skip directories and check ignore criteria
+        let relative_path = path.strip_prefix(&config.project_path)
+            .map_err(|e| format!("Path error: {}", e))?
+            .to_string_lossy()
+            .to_string();
+
+        if relative_path.is_empty() {
+            continue;
+        }
+
+        // Ignore checks
+        if relative_path.contains(".git") 
+            || relative_path.contains("node_modules") 
+            || relative_path.contains("target") 
+            || relative_path == "config.toml"
+            || relative_path == ".gh-repo.json"
+        {
+            continue;
+        }
+
+        let name = path.file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+
+        let parent_path = path.parent()
+            .unwrap_or(std::path::Path::new(""))
+            .strip_prefix(&config.project_path)
+            .unwrap_or(std::path::Path::new(""))
+            .to_string_lossy()
+            .to_string();
+
+        if path.is_file() {
+            // Read file content
+            if let Ok(content) = std::fs::read_to_string(path) {
+                files.push(serde_json::json!({
+                    "name": name,
+                    "path": relative_path,
+                    "type": "file",
+                    "content": content,
+                    "parentPath": parent_path
+                }));
+            }
+        } else if path.is_dir() {
+            files.push(serde_json::json!({
+                "name": name,
+                "path": relative_path,
+                "type": "dir",
+                "content": "",
+                "parentPath": parent_path
+            }));
+        }
+    }
+
+    println!("Uploading {} files/folders...", files.len());
+
+    let client = reqwest::Client::new();
+    let res = client.post(&format!("{}/repos/{}/sync", api_url, repo_id))
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({ "files": files }))
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    if !res.status().is_success() {
+        let err_text = res.text().await.unwrap_or_default();
+        return Err(format!("Server returned error: {}", err_text));
+    }
+
+    Ok(())
+}
+
+async fn handle_remote_link(id: &str, config: &Config) -> Result<String, String> {
+    let token = config.token.as_ref().ok_or("Not logged in. Please run 'login <email> <password>' first.")?;
+    let api_url = config.api_url.as_ref().unwrap_or(&"http://localhost:5000/api".to_string()).clone();
+    let client = reqwest::Client::new();
+
+    let res = client.get(&format!("{}/repos/{}", api_url, id))
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    if !res.status().is_success() {
+        let err_text = res.text().await.unwrap_or_default();
+        return Err(format!("Get repository failed: {}", err_text));
+    }
+
+    let json_resp: serde_json::Value = res.json()
+        .await
+        .map_err(|e| format!("Invalid response: {}", e))?;
+
+    let name = json_resp["data"]["name"].as_str()
+        .ok_or("Repository name not found in server response.")?
+        .to_string();
+
+    // Save repository metadata locally in .gh-repo.json
+    let meta = serde_json::json!({
+        "name": name,
+        "id": id
+    });
+    std::fs::write(".gh-repo.json", serde_json::to_string_pretty(&meta).unwrap())
+        .map_err(|e| format!("Failed to save repo config locally: {}", e))?;
+
+    Ok(name)
+}
+
+async fn handle_remote_pull(config: &Config) -> Result<(), String> {
+    let token = config.token.as_ref().ok_or("Not logged in. Please run 'login <email> <password>' first.")?;
+    let api_url = config.api_url.as_ref().unwrap_or(&"http://localhost:5000/api".to_string()).clone();
+
+    // Read target repository ID from local file `.gh-repo.json`
+    let repo_meta_path = ".gh-repo.json";
+    if !std::path::Path::new(repo_meta_path).exists() {
+        return Err("No remote repository configured. Run 'remote-link <repo_id>' or 'remote-create <repo_name>' first.".to_string());
+    }
+
+    let meta_content = std::fs::read_to_string(repo_meta_path)
+        .map_err(|e| format!("Failed to read repo metadata: {}", e))?;
+    let meta: serde_json::Value = serde_json::from_str(&meta_content)
+        .map_err(|e| format!("Failed to parse repo metadata: {}", e))?;
+
+    let repo_id = meta["id"].as_str().ok_or("Invalid repository ID in metadata file.")?;
+
+    println!("Pulling files for repository ID: {}...", repo_id);
+
+    let client = reqwest::Client::new();
+    let res = client.get(&format!("{}/repos/{}/contents", api_url, repo_id))
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    if !res.status().is_success() {
+        let err_text = res.text().await.unwrap_or_default();
+        return Err(format!("Server returned error: {}", err_text));
+    }
+
+    let json_resp: serde_json::Value = res.json()
+        .await
+        .map_err(|e| format!("Invalid JSON response: {}", e))?;
+
+    let tree_data = json_resp["data"].as_array().ok_or("Invalid data format from server.")?;
+
+    let base_path = std::path::Path::new(&config.project_path);
+
+    for node in tree_data {
+        write_tree_node(node, base_path)?;
+    }
+
+    Ok(())
+}
+
+fn write_tree_node(node: &serde_json::Value, base_path: &std::path::Path) -> Result<(), String> {
+    let path_str = node["path"].as_str().ok_or("Node path missing")?;
+    let node_type = node["type"].as_str().ok_or("Node type missing")?;
+    let local_path = base_path.join(path_str);
+
+    if node_type == "dir" {
+        std::fs::create_dir_all(&local_path)
+            .map_err(|e| format!("Failed to create directory {}: {}", local_path.display(), e))?;
+
+        if let Some(children) = node["children"].as_array() {
+            for child in children {
+                write_tree_node(child, base_path)?;
+            }
+        }
+    } else if node_type == "file" {
+        if let Some(parent) = local_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create directory {}: {}", parent.display(), e))?;
+        }
+        let content = node["content"].as_str().unwrap_or("");
+        std::fs::write(&local_path, content)
+            .map_err(|e| format!("Failed to write file {}: {}", local_path.display(), e))?;
+        println!("  {} {}", "->".green(), path_str);
+    }
+    Ok(())
 }
