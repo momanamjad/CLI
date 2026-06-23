@@ -50,7 +50,7 @@ impl Config {
         Self {
             project_path: ".".to_string(),
             token: None,
-            api_url: Some("http://localhost:5000/api".to_string()),
+            api_url: Some("https://gtihub-backend.vercel.app/api".to_string()),
         }
     }
 

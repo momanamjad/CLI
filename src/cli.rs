@@ -171,7 +171,7 @@ impl CommandHandler {
 }
 
 async fn handle_login(email: &str, password: &str, config: &mut Config) -> Result<String, String> {
-    let api_url = config.api_url.as_ref().unwrap_or(&"http://localhost:5000/api".to_string()).clone();
+    let api_url = resolve_api_url(config).await;
     let client = reqwest::Client::new();
     
     let res = client.post(&format!("{}/auth/login", api_url))
@@ -205,7 +205,7 @@ async fn handle_login(email: &str, password: &str, config: &mut Config) -> Resul
 
 async fn handle_remote_create(name: &str, desc: &str, config: &Config) -> Result<String, String> {
     let token = config.token.as_ref().ok_or("Not logged in. Please run 'login <email> <password>' first.")?;
-    let api_url = config.api_url.as_ref().unwrap_or(&"http://localhost:5000/api".to_string()).clone();
+    let api_url = resolve_api_url(config).await;
     let client = reqwest::Client::new();
 
     let res = client.post(&format!("{}/repos", api_url))
@@ -247,7 +247,7 @@ async fn handle_remote_create(name: &str, desc: &str, config: &Config) -> Result
 
 async fn handle_remote_push(config: &Config) -> Result<(), String> {
     let token = config.token.as_ref().ok_or("Not logged in. Please run 'login <email> <password>' first.")?;
-    let api_url = config.api_url.as_ref().unwrap_or(&"http://localhost:5000/api".to_string()).clone();
+    let api_url = resolve_api_url(config).await;
 
     // Read target repository ID from a local file `.gh-repo.json`
     let repo_meta_path = ".gh-repo.json";
@@ -344,7 +344,7 @@ async fn handle_remote_push(config: &Config) -> Result<(), String> {
 
 async fn handle_remote_link(id: &str, config: &Config) -> Result<String, String> {
     let token = config.token.as_ref().ok_or("Not logged in. Please run 'login <email> <password>' first.")?;
-    let api_url = config.api_url.as_ref().unwrap_or(&"http://localhost:5000/api".to_string()).clone();
+    let api_url = resolve_api_url(config).await;
     let client = reqwest::Client::new();
 
     let res = client.get(&format!("{}/repos/{}", api_url, id))
@@ -379,7 +379,7 @@ async fn handle_remote_link(id: &str, config: &Config) -> Result<String, String>
 
 async fn handle_remote_pull(config: &Config) -> Result<(), String> {
     let token = config.token.as_ref().ok_or("Not logged in. Please run 'login <email> <password>' first.")?;
-    let api_url = config.api_url.as_ref().unwrap_or(&"http://localhost:5000/api".to_string()).clone();
+    let api_url = resolve_api_url(config).await;
 
     // Read target repository ID from local file `.gh-repo.json`
     let repo_meta_path = ".gh-repo.json";
@@ -448,4 +448,28 @@ fn write_tree_node(node: &serde_json::Value, base_path: &std::path::Path) -> Res
         println!("  {} {}", "->".green(), path_str);
     }
     Ok(())
+}
+
+async fn resolve_api_url(config: &Config) -> String {
+    let configured_url = config.api_url.clone().unwrap_or_else(|| "http://localhost:5000/api".to_string());
+    if !configured_url.contains("localhost") && !configured_url.contains("127.0.0.1") {
+        return configured_url;
+    }
+    
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(400))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+        
+    let base_url = configured_url.trim_end_matches('/');
+    let health_url = if base_url.ends_with("/api") {
+        format!("{}/health", &base_url[..base_url.len()-4])
+    } else {
+        format!("{}/health", base_url)
+    };
+    
+    match client.get(&health_url).send().await {
+        Ok(resp) if resp.status().is_success() => configured_url,
+        _ => "https://gtihub-backend.vercel.app/api".to_string()
+    }
 }
