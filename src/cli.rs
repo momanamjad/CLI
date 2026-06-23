@@ -262,15 +262,32 @@ async fn handle_remote_push(config: &Config) -> Result<(), String> {
     
     let repo_id = meta["id"].as_str().ok_or("Invalid repository ID in metadata file.")?;
 
-    println!("Scanning project path: {} ...", config.project_path);
+    // Read gitignore patterns
+    let mut gitignore_patterns = Vec::new();
+    let gitignore_path = std::path::Path::new(&config.project_path).join(".gitignore");
+    if gitignore_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(gitignore_path) {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if !trimmed.is_empty() && !trimmed.starts_with('#') {
+                    gitignore_patterns.push(trimmed.to_string());
+                }
+            }
+        }
+    }
 
     let mut files = Vec::new();
+    let mut it = WalkDir::new(&config.project_path).into_iter();
 
-    for entry in WalkDir::new(&config.project_path) {
-        let entry = entry.map_err(|e| format!("Error scanning directory: {}", e))?;
+    loop {
+        let entry = match it.next() {
+            None => break,
+            Some(Err(err)) => return Err(format!("Error scanning directory: {}", err)),
+            Some(Ok(entry)) => entry,
+        };
+
         let path = entry.path();
         
-        // Skip directories and check ignore criteria
         let relative_path = path.strip_prefix(&config.project_path)
             .map_err(|e| format!("Path error: {}", e))?
             .to_string_lossy()
@@ -280,13 +297,11 @@ async fn handle_remote_push(config: &Config) -> Result<(), String> {
             continue;
         }
 
-        // Ignore checks
-        if relative_path.contains(".git") 
-            || relative_path.contains("node_modules") 
-            || relative_path.contains("target") 
-            || relative_path == "config.toml"
-            || relative_path == ".gh-repo.json"
-        {
+        // Apply gitignore matching
+        if should_ignore(&relative_path, &gitignore_patterns) {
+            if entry.file_type().is_dir() {
+                it.skip_current_dir();
+            }
             continue;
         }
 
@@ -450,6 +465,42 @@ fn write_tree_node(node: &serde_json::Value, base_path: &std::path::Path) -> Res
     Ok(())
 }
 
+fn should_ignore(relative_path: &str, patterns: &[String]) -> bool {
+    let normalized = relative_path.replace('\\', "/");
+    let parts: Vec<&str> = normalized.split('/').collect();
+    
+    if parts.contains(&".git") || parts.contains(&"config.toml") || parts.contains(&".gh-repo.json") {
+        return true;
+    }
+    
+    for pattern in patterns {
+        let pattern_norm = pattern.replace('\\', "/");
+        let pattern_clean = pattern_norm.trim_end_matches('/');
+        
+        if pattern_clean.starts_with("*.") {
+            let ext = &pattern_clean[2..];
+            if normalized.ends_with(ext) {
+                return true;
+            }
+        }
+        
+        for part in &parts {
+            if *part == pattern_clean {
+                return true;
+            }
+        }
+        
+        if normalized.starts_with(pattern_clean) 
+            || normalized.contains(&format!("/{}/", pattern_clean)) 
+            || normalized.ends_with(&format!("/{}", pattern_clean)) 
+        {
+            return true;
+        }
+    }
+    
+    false
+}
+
 async fn resolve_api_url(config: &Config) -> String {
     let configured_url = config.api_url.clone().unwrap_or_else(|| "http://localhost:5000/api".to_string());
     if !configured_url.contains("localhost") && !configured_url.contains("127.0.0.1") {
@@ -473,3 +524,9 @@ async fn resolve_api_url(config: &Config) -> String {
         _ => "https://gtihub-backend.vercel.app/api".to_string()
     }
 }
+
+
+
+
+
+
