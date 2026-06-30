@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ],
+      "@contexts/*": [
+        "./src/contexts/*"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*",
+    "public/customIcons/StarIcon.jsx"
+  ]
+}

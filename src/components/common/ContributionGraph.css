@@ -1,0 +1,244 @@
+.gh-contribution-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+@media (min-width: 768px) {
+  .gh-contribution-wrapper {
+    flex-direction: row;
+    gap: 32px;
+    padding: 20px;
+  }
+}
+
+.gh-main-content {
+  flex: 1;
+}
+
+.gh-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 14px;
+  color: #1f2328;
+}
+
+.gh-settings-btn {
+  background: none;
+  border: none;
+  color: #636c76;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.react-calendar-heatmap text {
+  font-size: 10px;
+  fill: #1f2328;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+.react-calendar-heatmap-month-label {
+  font-size: 10px;
+  fill: #636c76;
+}
+
+.gh-calendar-card {
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  padding: 16px;
+  background: #ffffff;
+  overflow-x: auto;
+}
+
+.gh-calendar-card svg.react-calendar-heatmap {
+  min-width: 650px;
+}
+
+.react-calendar-heatmap rect {
+  rx: 2;
+  ry: 2;
+}
+
+.react-calendar-heatmap .lvl-0 {
+  fill: #ebedf0;
+}
+
+.react-calendar-heatmap .lvl-1 {
+  fill: #9be9a8;
+}
+
+.react-calendar-heatmap .lvl-2 {
+  fill: #40c463;
+}
+
+.react-calendar-heatmap .lvl-3 {
+  fill: #30a14e;
+}
+
+.react-calendar-heatmap .lvl-4 {
+  fill: #216e39;
+}
+
+.gh-footer {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 12px;
+  font-size: 12px;
+  color: #636c76;
+}
+
+.gh-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: #636c76;
+}
+
+.gh-legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.legend-box {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.gh-year-sidebar {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 4px;
+  width: 100%;
+}
+
+@media (min-width: 768px) {
+  .gh-year-sidebar {
+    flex-direction: column;
+    width: 120px;
+  }
+}
+
+.legend-box.lvl-0 {
+  background-color: #ebedf0;
+}
+
+.legend-box.lvl-1 {
+  background-color: #9be9a8;
+}
+
+.legend-box.lvl-2 {
+  background-color: #40c463;
+}
+
+.legend-box.lvl-3 {
+  background-color: #30a14e;
+}
+
+.legend-box.lvl-4 {
+  background-color: #216e39;
+}
+
+.year-btn {
+  text-align: center;
+  padding: 8px 16px;
+  font-size: 12px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 6px;
+  color: #636c76;
+  margin-bottom: 2px;
+  flex: 1 1 auto;
+}
+
+@media (min-width: 768px) {
+  .year-btn {
+    text-align: left;
+    flex: none;
+    width: 100%;
+    margin-bottom: 8px;
+  }
+}
+
+.year-btn.active {
+  background-color: #0969da;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.year-btn:hover:not(.active) {
+  background-color: #f3f4f6;
+}
+
+/* ── Dark Mode Heatmap Styles ── */
+.dark .react-calendar-heatmap .lvl-0 {
+  fill: #161b22;
+}
+.dark .react-calendar-heatmap .lvl-1 {
+  fill: #0e4429;
+}
+.dark .react-calendar-heatmap .lvl-2 {
+  fill: #006d32;
+}
+.dark .react-calendar-heatmap .lvl-3 {
+  fill: #26a641;
+}
+.dark .react-calendar-heatmap .lvl-4 {
+  fill: #39d353;
+}
+
+.dark .legend-box.lvl-0 {
+  background-color: #161b22;
+}
+.dark .legend-box.lvl-1 {
+  background-color: #0e4429;
+}
+.dark .legend-box.lvl-2 {
+  background-color: #006d32;
+}
+.dark .legend-box.lvl-3 {
+  background-color: #26a641;
+}
+.dark .legend-box.lvl-4 {
+  background-color: #39d353;
+}
+
+.dark .gh-calendar-card {
+  border-color: #30363d;
+  background-color: #0d1117;
+}
+
+.dark .gh-header {
+  color: #c9d1d9;
+}
+
+.dark .gh-footer {
+  color: #8b949e;
+}
+
+.dark .year-btn:hover:not(.active) {
+  background-color: #21262d;
+}
+
+.dark .react-calendar-heatmap text {
+  fill: #c9d1d9;
+}
+
+.dark .react-calendar-heatmap-month-label {
+  fill: #8b949e;
+}

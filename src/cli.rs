@@ -157,6 +157,45 @@ impl CommandHandler {
                         }
                     }
                 }
+                "secret-set" => {
+                    if parts.len() < 3 {
+                        println!("Usage: secret-set <NAME> <VALUE>");
+                    } else {
+                        let name = parts[1];
+                        let value = parts[2..].join(" ");
+                        let value_clean = value.trim_matches(|c| c == '"' || c == '\'');
+                        match handle_secret_set(name, value_clean, &self.config).await {
+                            Ok(_) => println!("{}", "Secret saved successfully!".green()),
+                            Err(err) => println!("{} {}", "Failed to save secret:".red(), err),
+                        }
+                    }
+                }
+                "secret-list" => {
+                    match handle_secret_list(&self.config).await {
+                        Ok(secrets) => {
+                            if secrets.is_empty() {
+                                println!("No secrets defined for this repository.");
+                            } else {
+                                println!("\n{}", "=== Repository Secrets ===".yellow().bold());
+                                for secret in secrets {
+                                    println!("  - {} (created: {})", secret.name.green(), secret.created_at);
+                                }
+                            }
+                        }
+                        Err(err) => println!("{} {}", "Failed to list secrets:".red(), err),
+                    }
+                }
+                "secret-delete" => {
+                    if parts.len() < 2 {
+                        println!("Usage: secret-delete <NAME>");
+                    } else {
+                        let name = parts[1];
+                        match handle_secret_delete(name, &self.config).await {
+                            Ok(_) => println!("{}", "Secret deleted successfully!".green()),
+                            Err(err) => println!("{} {}", "Failed to delete secret:".red(), err),
+                        }
+                    }
+                }
                 "exit" => {
                     println!("{}", "Goodbye!".bright_red());
                     break;
@@ -523,6 +562,107 @@ async fn resolve_api_url(config: &Config) -> String {
         Ok(resp) if resp.status().is_success() => configured_url,
         _ => "https://gtihub-backend.vercel.app/api".to_string()
     }
+}
+
+#[derive(serde::Deserialize, Clone, Debug)]
+struct SecretListItem {
+    #[serde(rename = "_id")]
+    id: String,
+    name: String,
+    created_at: String,
+}
+
+async fn get_linked_repo_id() -> Result<String, String> {
+    let repo_meta_path = ".gh-repo.json";
+    if !std::path::Path::new(repo_meta_path).exists() {
+        return Err("No remote repository configured. Run 'remote-link <repo_id>' or 'remote-create <repo_name>' first.".to_string());
+    }
+    
+    let meta_content = std::fs::read_to_string(repo_meta_path)
+        .map_err(|e| format!("Failed to read repo metadata: {}", e))?;
+    let meta: serde_json::Value = serde_json::from_str(&meta_content)
+        .map_err(|e| format!("Failed to parse repo metadata: {}", e))?;
+    
+    let repo_id = meta["id"].as_str().ok_or("Invalid repository ID in metadata file.")?.to_string();
+    Ok(repo_id)
+}
+
+async fn handle_secret_set(name: &str, value: &str, config: &Config) -> Result<(), String> {
+    let token = config.token.as_ref().ok_or("Not logged in. Please run 'login <email> <password>' first.")?;
+    let repo_id = get_linked_repo_id().await?;
+    let api_url = resolve_api_url(config).await;
+    
+    let client = reqwest::Client::new();
+    let res = client.post(&format!("{}/repos/{}/secrets", api_url, repo_id))
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({
+            "name": name.to_uppercase(),
+            "value": value
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    if !res.status().is_success() {
+        let err_text = res.text().await.unwrap_or_default();
+        return Err(format!("Server returned error: {}", err_text));
+    }
+    Ok(())
+}
+
+async fn handle_secret_list(config: &Config) -> Result<Vec<SecretListItem>, String> {
+    let token = config.token.as_ref().ok_or("Not logged in. Please run 'login <email> <password>' first.")?;
+    let repo_id = get_linked_repo_id().await?;
+    let api_url = resolve_api_url(config).await;
+    
+    let client = reqwest::Client::new();
+    let res = client.get(&format!("{}/repos/{}/secrets", api_url, repo_id))
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    if !res.status().is_success() {
+        let err_text = res.text().await.unwrap_or_default();
+        return Err(format!("Server returned error: {}", err_text));
+    }
+
+    let json_resp: serde_json::Value = res.json()
+        .await
+        .map_err(|e| format!("Invalid JSON response: {}", e))?;
+
+    let secrets_arr = json_resp["data"].as_array().ok_or("Invalid secrets list format from server.")?;
+    
+    let list: Vec<SecretListItem> = serde_json::from_value(serde_json::Value::Array(secrets_arr.clone()))
+        .map_err(|e| format!("Failed to parse secrets: {}", e))?;
+        
+    Ok(list)
+}
+
+async fn handle_secret_delete(name: &str, config: &Config) -> Result<(), String> {
+    let token = config.token.as_ref().ok_or("Not logged in. Please run 'login <email> <password>' first.")?;
+    let repo_id = get_linked_repo_id().await?;
+    let api_url = resolve_api_url(config).await;
+    
+    // First, list current secrets to find the ID corresponding to the name
+    let secrets = handle_secret_list(config).await?;
+    let target_name = name.to_uppercase();
+    
+    let target_secret = secrets.iter().find(|s| s.name == target_name)
+        .ok_or_else(|| format!("Secret '{}' not found in this repository.", target_name))?;
+        
+    let client = reqwest::Client::new();
+    let res = client.delete(&format!("{}/repos/{}/secrets/{}", api_url, repo_id, target_secret.id))
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    if !res.status().is_success() {
+        let err_text = res.text().await.unwrap_or_default();
+        return Err(format!("Server returned error: {}", err_text));
+    }
+    Ok(())
 }
 
 

@@ -23,6 +23,9 @@ pub fn run() -> String {
     output.push_str(&format!("{:<25} {}\n", "git-status".cyan(), "Show git status"));
     output.push_str(&format!("{:<25} {}\n", "git-log <n>".cyan(), "Show last N git commits (default 5)"));
     output.push_str(&format!("{:<25} {}\n", "git-branch".cyan(), "List all git branches"));
+    output.push_str(&format!("{:<25} {}\n", "secret-set <k> <v>".cyan(), "Set or update repository secret"));
+    output.push_str(&format!("{:<25} {}\n", "secret-list".cyan(), "List all secret names in repository"));
+    output.push_str(&format!("{:<25} {}\n", "secret-delete <k>".cyan(), "Delete a repository secret"));
     output.push_str(&format!("{:<25} {}\n", "exit".cyan(), "Quit the CLI"));
     output
 }
