@@ -196,6 +196,18 @@ impl CommandHandler {
                         }
                     }
                 }
+                "remote-pull-wiki" => {
+                    match handle_remote_pull_wiki(&self.config).await {
+                        Ok(_) => println!("{}", "Repository Wiki pulled successfully!".green()),
+                        Err(err) => println!("{} {}", "Failed to pull Wiki:".red(), err),
+                    }
+                }
+                "remote-push-wiki" => {
+                    match handle_remote_push_wiki(&self.config).await {
+                        Ok(_) => println!("{}", "Repository Wiki pushed successfully!".green()),
+                        Err(err) => println!("{} {}", "Failed to push Wiki:".red(), err),
+                    }
+                }
                 "exit" => {
                     println!("{}", "Goodbye!".bright_red());
                     break;
@@ -661,6 +673,123 @@ async fn handle_secret_delete(name: &str, config: &Config) -> Result<(), String>
     if !res.status().is_success() {
         let err_text = res.text().await.unwrap_or_default();
         return Err(format!("Server returned error: {}", err_text));
+    }
+    Ok(())
+}
+
+async fn handle_remote_pull_wiki(config: &Config) -> Result<(), String> {
+    let token = config.token.as_ref().ok_or("Not logged in. Please run 'login <email> <password>' first.")?;
+    let repo_id = get_linked_repo_id().await?;
+    let api_url = resolve_api_url(config).await;
+    
+    println!("Pulling wiki pages for repository ID: {}...", repo_id);
+    let client = reqwest::Client::new();
+    
+    // 1. Fetch wiki page list
+    let res = client.get(&format!("{}/repos/{}/wiki", api_url, repo_id))
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    if !res.status().is_success() {
+        let err_text = res.text().await.unwrap_or_default();
+        return Err(format!("Server returned error: {}", err_text));
+    }
+
+    let json_resp: serde_json::Value = res.json()
+        .await
+        .map_err(|e| format!("Invalid JSON response: {}", e))?;
+
+    let pages = json_resp["data"].as_array().ok_or("Invalid wiki pages format from server.")?;
+
+    // Create target wiki directory locally
+    let wiki_dir = std::path::Path::new(&config.project_path).join("wiki");
+    std::fs::create_dir_all(&wiki_dir)
+        .map_err(|e| format!("Failed to create local wiki directory: {}", e))?;
+
+    for page in pages {
+        let slug = page["slug"].as_str().ok_or("Missing page slug")?;
+        
+        // 2. Fetch page content detail
+        let page_res = client.get(&format!("{}/repos/{}/wiki/{}", api_url, repo_id, slug))
+            .header("Authorization", format!("Bearer {}", token))
+            .send()
+            .await
+            .map_err(|e| format!("Network error: {}", e))?;
+
+        if page_res.status().is_success() {
+            let page_json: serde_json::Value = page_res.json().await.unwrap_or_default();
+            if let Some(content) = page_json["data"]["content"].as_str() {
+                let local_path = wiki_dir.join(format!("{}.md", slug));
+                std::fs::write(&local_path, content)
+                    .map_err(|e| format!("Failed to write local wiki page {}: {}", slug, e))?;
+                println!("  {} wiki/{}.md", "->".green(), slug);
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn handle_remote_push_wiki(config: &Config) -> Result<(), String> {
+    let token = config.token.as_ref().ok_or("Not logged in. Please run 'login <email> <password>' first.")?;
+    let repo_id = get_linked_repo_id().await?;
+    let api_url = resolve_api_url(config).await;
+    
+    let wiki_dir = std::path::Path::new(&config.project_path).join("wiki");
+    if !wiki_dir.exists() {
+        return Err("No local 'wiki' directory found. Run 'remote-pull-wiki' first or create a 'wiki' folder with markdown files.".to_string());
+    }
+
+    println!("Scanning 'wiki' folder for pages to push...");
+    let entries = std::fs::read_dir(&wiki_dir)
+        .map_err(|e| format!("Failed to read wiki directory: {}", e))?;
+
+    let client = reqwest::Client::new();
+
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("Error reading directory entry: {}", e))?;
+        let path = entry.path();
+        if path.is_file() && path.extension().map_or(false, |ext| ext == "md") {
+            let filename = path.file_stem().unwrap().to_string_lossy().to_string();
+            let content = std::fs::read_to_string(&path)
+                .map_err(|e| format!("Failed to read wiki file {}: {}", filename, e))?;
+
+            // Convert slug/filename to title format
+            // e.g. "getting-started" -> "Getting Started"
+            let title = filename
+                .replace('-', " ")
+                .replace('_', " ")
+                .split_whitespace()
+                .map(|word| {
+                    let mut chars = word.chars();
+                    match chars.next() {
+                        None => String::new(),
+                        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                    }
+                })
+                .collect::<Vec<String>>()
+                .join(" ");
+
+            println!("Pushing wiki page '{}'...", title);
+
+            let res = client.post(&format!("{}/repos/{}/wiki", api_url, repo_id))
+                .header("Authorization", format!("Bearer {}", token))
+                .json(&serde_json::json!({
+                    "title": title,
+                    "content": content
+                }))
+                .send()
+                .await
+                .map_err(|e| format!("Network error: {}", e))?;
+
+            if !res.status().is_success() {
+                let err_text = res.text().await.unwrap_or_default();
+                println!("  {} Failed to push '{}': {}", "x".red(), title, err_text);
+            } else {
+                println!("  {} Sync complete for '{}'", "✓".green(), title);
+            }
+        }
     }
     Ok(())
 }

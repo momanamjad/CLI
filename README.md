@@ -20,6 +20,10 @@ A fast, native terminal client built in Rust for bidirectional repository file t
 * `secret-list` — List all registered secrets (names only).
 * `secret-delete <key>` — Delete a secret from the vault.
 
+### Wiki Documentation Management
+* `remote-pull-wiki` — Pull remote repository Wiki pages as local Markdown files.
+* `remote-push-wiki` — Push local Markdown files in the `wiki/` directory to the remote Wiki.
+
 ### Local Utilities
 * `stats` — Displays lines of code, file counts, and language breakdown.
 * `deps` — Lists dependency structures in a formatted table.
