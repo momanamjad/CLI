@@ -148,7 +148,12 @@ impl CommandHandler {
                     }
                 }
                 "remote-push" => {
-                    match handle_remote_push(&self.config).await {
+                    let msg = if parts.len() > 1 {
+                        Some(parts[1..].join(" "))
+                    } else {
+                        None
+                    };
+                    match handle_remote_push(msg.as_deref(), &self.config).await {
                         Ok(_) => {
                             println!("{}", "Repository files pushed successfully!".green());
                         }
@@ -296,7 +301,7 @@ async fn handle_remote_create(name: &str, desc: &str, config: &Config) -> Result
     Ok(repo_id)
 }
 
-async fn handle_remote_push(config: &Config) -> Result<(), String> {
+async fn handle_remote_push(commit_message: Option<&str>, config: &Config) -> Result<(), String> {
     let token = config.token.as_ref().ok_or("Not logged in. Please run 'login <email> <password>' first.")?;
     let api_url = resolve_api_url(config).await;
 
@@ -392,10 +397,21 @@ async fn handle_remote_push(config: &Config) -> Result<(), String> {
 
     println!("Uploading {} files/folders...", files.len());
 
+    let payload = if let Some(msg) = commit_message {
+        serde_json::json!({
+            "files": files,
+            "commitMessage": msg
+        })
+    } else {
+        serde_json::json!({
+            "files": files
+        })
+    };
+
     let client = reqwest::Client::new();
     let res = client.post(&format!("{}/repos/{}/sync", api_url, repo_id))
         .header("Authorization", format!("Bearer {}", token))
-        .json(&serde_json::json!({ "files": files }))
+        .json(&payload)
         .send()
         .await
         .map_err(|e| format!("Network error: {}", e))?;
