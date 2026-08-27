@@ -374,6 +374,11 @@ async fn handle_remote_push(commit_message: Option<&str>, config: &Config) -> Re
             .to_string();
 
         if path.is_file() {
+            if let Ok(metadata) = std::fs::metadata(path) {
+                if metadata.len() > 100 * 1024 * 1024 { // 100MB
+                    return Err(format!("File '{}' exceeds the maximum allowed size of 100MB. Aborting push.", relative_path));
+                }
+            }
             // Read file content
             if let Ok(content) = std::fs::read_to_string(path) {
                 files.push(serde_json::json!({
