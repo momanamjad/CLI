@@ -43,6 +43,8 @@ const timezones = [
   "(GMT+12:00) Auckland, Wellington, Fiji",
 ];
 
+import { generateIdenticon } from "../../utils/identicon";
+
 const EditProfileForm = ({ userProfile, onSave, onCancel }) => {
   const [formData, setFormData] = useState({
     name: userProfile?.name || "",
@@ -55,7 +57,7 @@ const EditProfileForm = ({ userProfile, onSave, onCancel }) => {
       userProfile?.timezone || "(GMT-12:00) International Date Line West",
     website: userProfile?.website || "",
     socialLinks: userProfile?.socialLinks || ["", "", "", ""],
-    avatar: userProfile?.avatar || "/profile.webp",
+    avatar: userProfile?.avatar || generateIdenticon(userProfile?.username || "default"),
   });
 
   const [uploading, setUploading] = useState(false);

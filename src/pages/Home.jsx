@@ -9,7 +9,7 @@ import { Skeleton } from 'boneyard-js/react';
 import { HomeSidebarSkeleton, HomeFeedSkeleton } from "@features/HomeSkeleton";
 import { languageColors } from "@utils/LanguageColors.jsx";
 import PinnedRepoCard from "@features/PinnedRepoCard";
-
+import { generateIdenticon } from "@/utils/identicon";
 
 const INITIAL_REPO_COUNT = 7;
 
@@ -179,7 +179,7 @@ const Home = React.memo(() => {
                   <div key={repo.id || repo.name} className="p-4 border border-[#d0d7de] dark:border-[#30363d] rounded-lg bg-white dark:bg-[#161b22] shadow-sm">
                     <div className="flex items-center gap-2 mb-3">
                       <div className="w-5 h-5 rounded-full overflow-hidden">
-                        <img src="profile.webp" alt="Avatar" className="w-full h-full object-cover" />
+                        <img src={repo.owner?.avatar_url || generateIdenticon(repo.owner?.login || activeUsername)} alt="Avatar" className="w-full h-full object-cover" />
                       </div>
                       <span className="text-xs text-[#1f2328] dark:text-[#c9d1d9] font-medium">{repo.owner?.login || activeUsername}</span>
                       <span className="text-xs text-[#636c76] dark:text-[#8b949e]">created a repository</span>
