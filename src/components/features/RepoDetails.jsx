@@ -10,6 +10,7 @@ import DiscussionsTab from "./tabs/DiscussionsTab";
 import ProjectsTab from "./tabs/ProjectsTab";
 import ActionsTab from "./tabs/ActionsTab";
 import MarkdownRenderer from "../common/MarkdownRenderer";
+import { generateIdenticon } from "../../utils/identicon";
 import {
   FileDirectoryFillIcon,
   FileIcon,
@@ -218,7 +219,7 @@ const RepoDetails = () => {
       hash: "8a39f04",
       message: "feat: complete notifications, pin/star, discussions, and repository l...",
       author: "momanamjad",
-      avatar_url: "https://avatars.githubusercontent.com/u/104862410?v=4",
+      avatar_url: generateIdenticon("momanamjad"),
       date: "13 hours ago",
       files: []
     },
@@ -226,7 +227,7 @@ const RepoDetails = () => {
       hash: "7d2b451",
       message: "fix: restore PWA installability with correctly-sized icons and pr...",
       author: "momanamjad",
-      avatar_url: "https://avatars.githubusercontent.com/u/104862410?v=4",
+      avatar_url: generateIdenticon("momanamjad"),
       date: "last month",
       files: []
     }
@@ -285,7 +286,7 @@ const RepoDetails = () => {
             hash: (c._id || c.id || '').substring(0, 7),
             message: c.type === 'repo_created' ? 'Initial commit' : `${c.type.replace(/_/g, ' ')}`,
             author: c.user?.login || 'unknown',
-            avatar_url: c.user?.avatar_url || 'https://avatars.githubusercontent.com/u/104862410?v=4',
+            avatar_url: c.user?.avatar_url || generateIdenticon(c.user?.login || "unknown"),
             date: formatGitHubDate(c.created_at),
             files: []
           }));
@@ -402,7 +403,7 @@ const RepoDetails = () => {
           console.warn("Repo not found in local backend, generating configuration...");
           repoInfo = {
             name: repo,
-            owner: { login: username, avatar_url: "https://avatars.githubusercontent.com/u/104862410?v=4" },
+            owner: { login: username, avatar_url: generateIdenticon(username) },
             visibility: "public",
             description: "No description provided.",
             stars_count: 1,
@@ -433,7 +434,7 @@ const RepoDetails = () => {
                 hash: c.sha.substring(0, 7),
                 message: c.commit.message,
                 author: c.author?.login || c.commit.author.name,
-                avatar_url: c.author?.avatar_url || "https://avatars.githubusercontent.com/u/104862410?v=4",
+                avatar_url: c.author?.avatar_url || generateIdenticon(c.author?.login || c.commit.author.name || "unknown"),
                 date: formatGitHubDate(c.commit.author.date),
                 files: []
               }));
@@ -1115,7 +1116,7 @@ const RepoDetails = () => {
                     <div className="bg-[#f6f8fa] dark:bg-[#161b22] border-b border-[#d0d7de] dark:border-[#30363d] p-3 flex items-center justify-between text-xs text-[#57606a] dark:text-[#8b949e]">
                       <div className="flex items-center gap-2 min-w-0">
                         <img
-                          src={commitsList[0]?.avatar_url || "https://avatars.githubusercontent.com/u/104862410?v=4"}
+                          src={commitsList[0]?.avatar_url || generateIdenticon(commitsList[0]?.author || "unknown")}
                           alt="avatar"
                           className="w-5 h-5 rounded-full object-cover border border-[#d0d7de] dark:border-[#30363d]"
                         />
@@ -1432,7 +1433,7 @@ const RepoDetails = () => {
                         <div className="bg-[#f6f8fa] dark:bg-[#161b22] px-3.5 py-2 border-b border-[#d0d7de] dark:border-[#30363d] flex items-center justify-between text-xs">
                           <div className="flex items-center gap-2">
                             <img
-                              src={c.author?.avatar_url || "/profile.webp"}
+                              src={c.author?.avatar_url || generateIdenticon(c.author?.login || c.commit?.author?.name || "unknown")}
                               alt="avatar"
                               className="w-5 h-5 rounded-full border object-cover"
                             />
@@ -1685,7 +1686,7 @@ const RepoDetails = () => {
                         <div className="bg-[#f6f8fa] dark:bg-[#161b22] px-3.5 py-2 border-b border-[#d0d7de] dark:border-[#30363d] flex items-center justify-between text-xs">
                           <div className="flex items-center gap-2">
                             <img
-                              src={c.author?.avatar_url || "/profile.webp"}
+                              src={c.author?.avatar_url || generateIdenticon(c.author?.login || c.commit?.author?.name || "unknown")}
                               alt="avatar"
                               className="w-5 h-5 rounded-full border object-cover"
                             />
